@@ -1,32 +1,38 @@
 import asyncio
 import sqlite3
+import os  # Модуль для безопасного чтения ключей из настроек сервера
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from google import genai
+# Используем стабильную библиотеку, которая работает с твоим типом ключа
+import google.generativeai as genai 
 
 # ==========================================
-# ⚙️ БЛОК КОНФИГУРАЦИИ (ЗАПОЛНИ СВОИ ДАННЫЕ)
+# ⚙️ БЛОК КОНФИГУРАЦИИ (БЕЗОПАСНЫЙ)
 # ==========================================
-BOT_TOKEN = "8920352441:AAF6zY_myN2Ezt816N2L9Y_IYk0yAaEQwyU"
-GEMINI_API_KEY = "AQ.Ab8RN6I0X1dOpq3Yt9x8bozAW_JPESWyauKf1q85wV2isvRcAA"
+# Бот автоматически возьмет ключи из панели управления Render
+BOT_TOKEN = os.getenv("BOT_TOKEN", "СЮДА_НИЧЕГО_НЕ_ПИШИ")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "СЮДА_НИЧЕГО_НЕ_ПИШИ")
+
+# Публичные ссылки (их скрывать не нужно)
 CHANNEL_ID = "@ismoil_lab" 
 CHANNEL_URL = "https://t.me/ismoil_lab"
-ADMIN_ID = 8082255890  # Вставь свой Telegram ID цифрами
+ADMIN_ID = 8082255890  # Твой Telegram ID цифрами
+
+# Настраиваем ИИ полученным ключом
+genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# 🤖 ИНИЦИАЛИЗАЦИЯ
+# 🤖 ИНИЦИАЛИЗАЦИЯ БОТА
 # ==========================================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Хранилище активных чатов Gemini для каждого пользователя
+# Хранилище для истории диалогов ИИ (чтобы бот помнил контекст)
 user_chats = {}
 
-# Состояния для админ-панели
 class AdminStates(StatesGroup):
     mailing_text = State()
 
@@ -70,10 +76,10 @@ def get_all_users():
     return users
 
 # ==========================================
-# 📢 ПРОВЕРКА ПОДПИСКИ
+# 📢 ПРОВЕРКА ПОДПИСКИ НА КАНАЛ
 # ==========================================
 async def check_subscription(user_id: int) -> bool:
-    if user_id == ADMIN_ID:  # Админу проверку делать не обязательно
+    if user_id == ADMIN_ID:
         return True
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
@@ -100,7 +106,7 @@ async def start_cmd(message: Message):
     if is_sub:
         await message.answer(
             f"👋 Привет, {message.from_user.first_name}!\n\n"
-            "Я твой профессиональный AI-помощник на базе **Gemini 2.5**.\n"
+            "Я твой профессиональный AI-помощник на базе **Gemini**.\n"
             "Я отлично помню контекст нашего диалога. Задавай любой вопрос!"
         )
     else:
@@ -156,7 +162,7 @@ async def admin_mail_send(message: Message, state: FSMContext):
         try:
             await bot.send_message(chat_id=user_id, text=message.text)
             sent_count += 1
-            await asyncio.sleep(0.05)  # Защита от лимитов Telegram
+            await asyncio.sleep(0.05)
         except Exception:
             pass
             
@@ -172,16 +178,17 @@ async def handle_ai_message(message: Message):
         await message.answer("⚠️ Доступ ограничен. Подпишись на канал.", reply_markup=get_sub_keyboard())
         return
 
-    # Запускаем анимацию "печатает..."
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
     user_id = message.from_user.id
     
-    # Если у пользователя еще нет сессии чата, создаем её
+    # Инициализируем чат по правилам старой библиотеки для поддержки твоего ключа
     if user_id not in user_chats:
-        user_chats[user_id] = ai_client.chats.create(model='gemini-2.5-flash')
+        try:
+            user_chats[user_id] = genai.GenerativeModel('gemini-pro').start_chat(history=[])
+        except Exception as model_e:
+            print(f"Ошибка создания модели: {model_e}")
 
     try:
-        # Отправляем сообщение в чат через executor, чтобы бот не зависал
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None, 
@@ -193,11 +200,11 @@ async def handle_ai_message(message: Message):
         print(f"Ошибка Gemini: {e}")
 
 # ==========================================
-# RUN BOT
+# ПОТОК ЗАПУСКА
 # ==========================================
 async def main():
-    init_db()  # Инициализация базы данных
-    print("Профессиональный ИИ-бот запущен и работает без ошибок!")
+    init_db()
+    print("ИИ-бот успешно запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
